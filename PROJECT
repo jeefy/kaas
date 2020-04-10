@@ -1,0 +1,7 @@
+domain: honk.ci
+repo: github.com/jeefy/kaas
+resources:
+- group: honk
+  kind: Cluster
+  version: v1
+version: "2"

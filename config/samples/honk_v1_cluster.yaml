@@ -1,0 +1,7 @@
+apiVersion: honk.honk.ci/v1
+kind: Cluster
+metadata:
+  name: cluster-sample
+spec:
+  # Add fields here
+  foo: bar
