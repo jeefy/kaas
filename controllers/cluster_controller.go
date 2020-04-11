@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -46,6 +47,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
 	log := r.Log.WithValues("cluster", req.NamespacedName)
 	var err error
+	var update bool
 
 	var cluster honkv1.Cluster
 	if err = r.Get(ctx, req.NamespacedName, &cluster); err != nil {
@@ -56,171 +58,104 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	cm := generateClusterConfigmap(cluster, req.Namespace)
+	cm := cluster.ConfigMap(req.Namespace)
 	foundCM := &v1.ConfigMap{}
 	err = r.Get(context.TODO(), types.NamespacedName{Name: cm.GetName(), Namespace: cm.GetNamespace()}, foundCM)
 	if err != nil && errors.IsNotFound(err) {
 		log.Info(fmt.Sprintf("Creating ConfigMap %s/%s\n", cm.GetNamespace(), cm.GetName()))
 		err = r.Create(context.TODO(), cm)
 		if err != nil {
-			log.Info(fmt.Sprintf("Error creating ConfigMap %s/%s - %v\n", cm.GetNamespace(), cm.GetName(), err.Error()))
 			return ctrl.Result{}, err
 		}
 	} else if err != nil {
-		log.Info(fmt.Sprintf("Error getting ConfigMap %s/%s - %v\n", cm.GetNamespace(), cm.GetName(), err.Error()))
 		return ctrl.Result{}, err
+	} else {
+		if !reflect.DeepEqual(cm.Data, foundCM.Data) {
+			log.Info(fmt.Sprintf("Updating ConfigMap object %s/%s", cm.Namespace, cm.Name))
+			foundCM.Data = cm.Data
+			err = r.Update(context.TODO(), foundCM)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			update = true
+		}
 	}
 
-	pod := generateClusterPod(&cluster, cm)
+	pod := cluster.Pod(req.Namespace)
 	foundPod := &v1.Pod{}
 	err = r.Get(context.TODO(), types.NamespacedName{Name: pod.GetName(), Namespace: pod.GetNamespace()}, foundPod)
+
 	if err != nil && errors.IsNotFound(err) {
 		log.Info(fmt.Sprintf("Creating Pod %s/%s\n", pod.GetNamespace(), pod.GetName()))
 		err = r.Create(context.TODO(), pod)
 		if err != nil {
-			log.Info(fmt.Sprintf("Error creating Pod %s/%s - %v\n", pod.GetNamespace(), pod.GetName(), err.Error()))
 			return ctrl.Result{}, err
 		}
 	} else if err != nil {
-		log.Info(fmt.Sprintf("Error getting Pod %s/%s - %v\n", pod.GetNamespace(), pod.GetName(), err.Error()))
 		return ctrl.Result{}, err
+	} else {
+		if !cluster.PodSpecEquals(foundPod) {
+			update = true
+		}
+
+		if update {
+			// Refresh pods
+			err = r.Delete(context.TODO(), foundPod)
+			if err != nil && errors.IsNotFound(err) {
+				return ctrl.Result{}, nil
+			}
+
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
 }
 
+var (
+	jobOwnerKey = ".metadata.controller"
+	apiGVStr    = honkv1.GroupVersion.String()
+)
+
+// SetupWithManager sets up the controller manager :tada:
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Index the Cluster-Pods
+	if err := mgr.GetFieldIndexer().IndexField(&v1.Pod{}, jobOwnerKey, func(rawObj runtime.Object) []string {
+		pod := rawObj.(*v1.Pod)
+		owner := metav1.GetControllerOf(pod)
+		if owner == nil {
+			return nil
+		}
+
+		if owner.APIVersion != apiGVStr || owner.Kind != "Cluster" {
+			return nil
+		}
+
+		return []string{owner.Name}
+	}); err != nil {
+		return err
+	}
+
+	// Index the Cluster-ConfigMaps
+	if err := mgr.GetFieldIndexer().IndexField(&v1.ConfigMap{}, jobOwnerKey, func(rawObj runtime.Object) []string {
+		cm := rawObj.(*v1.ConfigMap)
+		owner := metav1.GetControllerOf(cm)
+		if owner == nil {
+			return nil
+		}
+
+		if owner.APIVersion != apiGVStr || owner.Kind != "Cluster" {
+			return nil
+		}
+
+		return []string{owner.Name}
+	}); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&honkv1.Cluster{}).
+		Owns(&v1.Pod{}).
+		Owns(&v1.ConfigMap{}).
 		Complete(r)
-}
-
-func generateClusterConfigmap(cluster honkv1.Cluster, namespace string) *v1.ConfigMap {
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cluster.Name,
-			Namespace: namespace,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(&cluster, honkv1.SchemeBuilder.GroupVersion.WithKind("Cluster")),
-			},
-		},
-	}
-
-	cm.Data = make(map[string]string)
-
-	cm.Data["kind-config.yaml"] = string(cluster.Spec.KindSpec)
-
-	for key, data := range cluster.Spec.ClusterYAML {
-		cm.Data[fmt.Sprintf("%d.yaml", key)] = data
-	}
-
-	return cm
-}
-
-func generateClusterPod(cluster *honkv1.Cluster, configMap *v1.ConfigMap) *v1.Pod {
-	defaultMode := int32(0777)
-	falseValue := false
-	resourceList := v1.ResourceList{}
-	resourceList[v1.ResourceCPU] = *cluster.Spec.CPU
-	resourceList[v1.ResourceMemory] = *cluster.Spec.Memory
-	command := "sleep 5 && tail /var/log/docker.log && gsutil cp -P gs://bentheelder-kind-ci-builds/latest/kind-linux-amd64 \"${PATH%%%%:*}/kind\" && apt update && apt install -y jq && kind create cluster --config=/honk/kind-config.yaml && sleep 5"
-	for key := range configMap.Data {
-		if key != "kind-config.yaml" {
-			command += fmt.Sprintf(" && kubectl apply -f /honk/%s && sleep 5", key)
-		}
-	}
-	//  && kubectl apply -f /honk/01.yaml && sleep 5 && kubectl apply -f /honk/02.yaml && sleep 5 && kubectl apply -f /honk/03.yaml"
-	command += " && sleep infinity"
-
-	return &v1.Pod{
-		TypeMeta: metav1.TypeMeta{
-			Kind: "pod",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cluster.Name,
-			Namespace: configMap.Namespace,
-			Labels:    cluster.GetLabels(),
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(cluster, honkv1.SchemeBuilder.GroupVersion.WithKind("Cluster")),
-			},
-		},
-		Spec: v1.PodSpec{
-			//			RuntimeClassName: &runtimeClass,
-			AutomountServiceAccountToken: &falseValue,
-			EnableServiceLinks:           &falseValue,
-			Containers: []v1.Container{
-				{
-					Name:  "kind",
-					Image: "gcr.io/k8s-testimages/krte@sha256:6cae666d578e2ad87f25934efa7b0a907827cf2cd515067c49e6144954b9cb70",
-					Command: []string{
-						"wrapper.sh",
-						"bash",
-						"-c",
-						command,
-					},
-					Env: []v1.EnvVar{
-						{Name: "DOCKER_IN_DOCKER_ENABLED", Value: "true"},
-					},
-					VolumeMounts: []v1.VolumeMount{
-						{
-							Name:      "docker-root",
-							MountPath: "/var/lib/docker",
-						},
-						{
-							Name:      "modules",
-							MountPath: "/lib/modules",
-							ReadOnly:  true,
-						},
-						{
-							Name:      "cgroup",
-							MountPath: "/sys/fs/cgroup",
-						},
-						{
-							Name:      "honk",
-							MountPath: "/honk",
-						},
-					},
-					Resources: v1.ResourceRequirements{
-						Limits:   resourceList,
-						Requests: resourceList,
-					},
-				},
-			},
-			Volumes: []v1.Volume{
-				{
-					Name: "docker-root",
-					VolumeSource: v1.VolumeSource{
-						EmptyDir: &v1.EmptyDirVolumeSource{},
-					},
-				},
-				{
-					Name: "modules",
-					VolumeSource: v1.VolumeSource{
-						HostPath: &v1.HostPathVolumeSource{
-							Path: "/lib/modules",
-						},
-					},
-				},
-				{
-					Name: "cgroup",
-					VolumeSource: v1.VolumeSource{
-						HostPath: &v1.HostPathVolumeSource{
-							Path: "/sys/fs/cgroup",
-						},
-					},
-				},
-				{
-					Name: "honk",
-					VolumeSource: v1.VolumeSource{
-						ConfigMap: &v1.ConfigMapVolumeSource{
-							LocalObjectReference: v1.LocalObjectReference{
-								Name: cluster.Name,
-							},
-							DefaultMode: &defaultMode,
-						},
-					},
-				},
-			},
-		},
-	}
 }
