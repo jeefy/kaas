@@ -51,11 +51,12 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	var cluster honkv1.Cluster
 	if err = r.Get(ctx, req.NamespacedName, &cluster); err != nil {
-		log.Error(err, "unable to fetch Cluster")
+		// log.Error(err, "unable to fetch Cluster")
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
 		// requeue (we'll need to wait for a new notification), and we can get them
 		// on deleted requests.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		//return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, nil
 	}
 
 	cm := cluster.ConfigMap(req.Namespace)
@@ -67,6 +68,8 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+	} else if err != nil && errors.IsAlreadyExists(err) {
+		return ctrl.Result{}, nil
 	} else if err != nil {
 		return ctrl.Result{}, err
 	} else {

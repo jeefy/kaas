@@ -73,7 +73,7 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 		command += fmt.Sprintf(" && kubectl apply -f /honk/%d.yaml && sleep 5", key)
 	}
 	//  && kubectl apply -f /honk/01.yaml && sleep 5 && kubectl apply -f /honk/02.yaml && sleep 5 && kubectl apply -f /honk/03.yaml"
-	command += " && sleep infinity"
+	command += " && kubectl create ns honk && sleep infinity"
 
 	return &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
@@ -100,6 +100,20 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 						"bash",
 						"-c",
 						command,
+					},
+					ReadinessProbe: &v1.Probe{
+						InitialDelaySeconds: 90,
+						TimeoutSeconds:      5,
+						Handler: v1.Handler{
+							Exec: &v1.ExecAction{
+								Command: []string{
+									"kubectl",
+									"get",
+									"ns",
+									"honk",
+								},
+							},
+						},
 					},
 					Env: []v1.EnvVar{
 						{Name: "DOCKER_IN_DOCKER_ENABLED", Value: "true"},
