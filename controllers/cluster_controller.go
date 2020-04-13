@@ -118,11 +118,13 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 					config, err := ctrl.GetConfig()
 					if err != nil {
+						log.Info("Can't get config from ctrl")
 						return ctrl.Result{}, err
 					}
 
 					cluster, err = cluster.Kubeconfig(config)
 					if err != nil {
+						log.Info("Can't get adminkubeconfig from cluster")
 						return ctrl.Result{}, err
 					}
 

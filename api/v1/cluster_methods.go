@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"os"
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/kubectl/pkg/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 // PodSpecEquals accepts a pod and returns a bool whether the
@@ -74,12 +73,17 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 	resourceList := v1.ResourceList{}
 	resourceList[v1.ResourceCPU] = *c.Spec.CPU
 	resourceList[v1.ResourceMemory] = *c.Spec.Memory
-	command := "sleep 5 && tail /var/log/docker.log && gsutil cp -P gs://bentheelder-kind-ci-builds/latest/kind-linux-amd64 \"${PATH%%%%:*}/kind\" && apt update && apt install -y jq && kind create cluster --config=/honk/kind-config.yaml && sleep 5"
+	command := "sleep 5 && curl -sSLo \"${PATH%%:*}/kind\" https://storage.googleapis.com/bentheelder-kind-ci-builds/latest/kind-linux-amd64 && chmod +x \"${PATH%%:*}/kind\" && curl -sSLo /root/add_sa.sh https://gist.githubusercontent.com/jeefy/81fb5bc9b95898c1492d796a8a27ab10/raw/374f0cf09a6a6eceb5ae982bbd5df39dab7804e5/kubernetes_add_service_account_kubeconfig.sh && chmod +x /root/add_sa.sh && apt update && apt install -y jq && kind create cluster --config=/honk/kind-config.yaml && sleep 5 && /root/add_sa.sh kind-user default && sleep 5"
 	for key := range c.Spec.ClusterYAML {
 		command += fmt.Sprintf(" && kubectl apply -f /honk/%d.yaml && sleep 5", key)
 	}
 	//  && kubectl apply -f /honk/01.yaml && sleep 5 && kubectl apply -f /honk/02.yaml && sleep 5 && kubectl apply -f /honk/03.yaml"
 	command += " && kubectl create ns honk && sleep infinity"
+
+	trueValue := true
+	securityContext := v1.SecurityContext{
+		Privileged: &trueValue,
+	}
 
 	return &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
@@ -99,8 +103,9 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 			EnableServiceLinks:           &falseValue,
 			Containers: []v1.Container{
 				{
-					Name:  "kind",
-					Image: "gcr.io/k8s-testimages/krte@sha256:6cae666d578e2ad87f25934efa7b0a907827cf2cd515067c49e6144954b9cb70",
+					Name:            "kind",
+					Image:           "gcr.io/k8s-testimages/krte@sha256:6cae666d578e2ad87f25934efa7b0a907827cf2cd515067c49e6144954b9cb70",
+					SecurityContext: &securityContext,
 					Command: []string{
 						"wrapper.sh",
 						"bash",
@@ -108,7 +113,7 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 						command,
 					},
 					ReadinessProbe: &v1.Probe{
-						InitialDelaySeconds: 90,
+						InitialDelaySeconds: 120,
 						TimeoutSeconds:      5,
 						Handler: v1.Handler{
 							Exec: &v1.ExecAction{
@@ -190,53 +195,70 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 
 // Kubeconfig sets the cluster status kubeconfigs
 func (c Cluster) Kubeconfig(config *rest.Config) (Cluster, error) {
-	gvk, err := apiutil.GVKForObject(&Cluster{}, scheme.Scheme)
+	data, err := c.catFile(config, "/root/.kube/config")
 	if err != nil {
 		return c, err
 	}
-	restClient, err := apiutil.RESTClientForGVK(gvk, config, scheme.Codecs)
+	c.Status.ClusterAdminConfig = data
+
+	data, err = c.catFile(config, "/tmp/kube/k8s-kind-user-default-conf")
 	if err != nil {
 		return c, err
+	}
+	c.Status.DefaultUserConfig = data
+
+	return c, nil
+}
+
+func (c Cluster) catFile(config *rest.Config, filename string) (data string, err error) {
+	return c.execCommand(config, []string{"cat", filename})
+}
+
+func (c Cluster) execCommand(config *rest.Config, command []string) (data string, err error) {
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Printf("Unable to create clientset: %s", err.Error())
+		return "", err
 	}
 
-	execReq := restClient.Post().
+	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(c.Name).
 		Namespace(c.Namespace).
 		SubResource("exec")
 
-	execReq.VersionedParams(&v1.PodExecOptions{
-		Command: []string{"cat", "/root/.kube/config"},
-		Stdin:   true,
-		Stdout:  true,
-		Stderr:  true,
+	log.Printf("Exec command for %s/%s", c.Namespace, c.Name)
+	var stdout, stderr bytes.Buffer
+
+	req.VersionedParams(&v1.PodExecOptions{
+		Command:   command,
+		Container: "",
+		Stdin:     false,
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       false,
 	}, scheme.ParameterCodec)
 
-	exec, err := remotecommand.NewSPDYExecutor(config, "POST", execReq.URL())
+	fmt.Println("Request URL:", req.URL().String())
+
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
 	if err != nil {
-		return c, err
+		log.Printf("spdy error: %v", err)
 	}
 
-	stdout := new(bytes.Buffer)
-	stderr := new(bytes.Buffer)
-
 	err = exec.Stream(remotecommand.StreamOptions{
-		Stdin:  os.Stdin,
-		Stdout: stdout,
-		Stderr: stderr,
+		Stdin:  nil,
+		Stdout: &stdout,
+		Stderr: &stderr,
 		Tty:    false,
 	})
 
 	if err != nil {
-		return c, err
+		log.Printf("stderr: `%s`", stderr.String())
+		log.Printf("stdout: `%s`", stdout.String())
+		log.Printf("stream error: `%v`", err)
+		return "", err
 	}
 
-	if stderr.String() != "" {
-		log.Printf("Exec error output: %s", stderr)
-		return c, nil
-	}
-
-	c.Status.ClusterAdminConfig = stdout.String()
-
-	return c, nil
+	return stdout.String(), nil
 }
