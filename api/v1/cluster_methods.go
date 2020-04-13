@@ -1,13 +1,19 @@
 package v1
 
 import (
+	"bytes"
 	"fmt"
 	"log"
+	"os"
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/kubectl/pkg/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 // PodSpecEquals accepts a pod and returns a bool whether the
@@ -180,4 +186,57 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 			},
 		},
 	}
+}
+
+// Kubeconfig sets the cluster status kubeconfigs
+func (c Cluster) Kubeconfig(config *rest.Config) (Cluster, error) {
+	gvk, err := apiutil.GVKForObject(&Cluster{}, scheme.Scheme)
+	if err != nil {
+		return c, err
+	}
+	restClient, err := apiutil.RESTClientForGVK(gvk, config, scheme.Codecs)
+	if err != nil {
+		return c, err
+	}
+
+	execReq := restClient.Post().
+		Resource("pods").
+		Name(c.Name).
+		Namespace(c.Namespace).
+		SubResource("exec")
+
+	execReq.VersionedParams(&v1.PodExecOptions{
+		Command: []string{"cat", "/root/.kube/config"},
+		Stdin:   true,
+		Stdout:  true,
+		Stderr:  true,
+	}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", execReq.URL())
+	if err != nil {
+		return c, err
+	}
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdin:  os.Stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		Tty:    false,
+	})
+
+	if err != nil {
+		return c, err
+	}
+
+	if stderr.String() != "" {
+		log.Printf("Exec error output: %s", stderr)
+		return c, nil
+	}
+
+	c.Status.ClusterAdminConfig = stdout.String()
+
+	return c, nil
 }

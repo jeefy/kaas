@@ -91,9 +91,10 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	if err != nil && errors.IsNotFound(err) {
 		log.Info(fmt.Sprintf("Creating Pod %s/%s\n", pod.GetNamespace(), pod.GetName()))
 		err = r.Create(context.TODO(), pod)
-		if err != nil {
+		if err != nil && !errors.IsAlreadyExists(err) {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, nil
 	} else if err != nil {
 		return ctrl.Result{}, err
 	} else {
@@ -109,6 +110,28 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			}
 
 			return ctrl.Result{}, err
+		}
+		if foundPod.Status.Phase == v1.PodRunning {
+			if foundPod.Status.ContainerStatuses[0].Ready {
+				if !cluster.Status.Ready {
+					cluster.Status.Ready = true
+
+					config, err := ctrl.GetConfig()
+					if err != nil {
+						return ctrl.Result{}, err
+					}
+
+					cluster, err = cluster.Kubeconfig(config)
+					if err != nil {
+						return ctrl.Result{}, err
+					}
+
+					err = r.Update(context.TODO(), &cluster)
+					if err != nil {
+						return ctrl.Result{}, err
+					}
+				}
+			}
 		}
 	}
 

@@ -28,50 +28,19 @@ type ClusterSpec struct {
 
 	ClusterYAML []string `json:"clusterYAML,omitempty"`
 
-	Source *ClusterSource `json:"clusterSource,omitempty"`
-
 	CPU *resource.Quantity `json:"cpu"`
 
 	Memory *resource.Quantity `json:"memory"`
-}
-
-// +kubebuilder:object:root=true
-
-// ClusterSource defines a cluster config source to attempt to sync to
-type ClusterSource struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	GitHubSource *GitHubClusterSource `json:"githubSource,omitempty"`
-	FileSource   *FileClusterSource   `json:"fileSource,omitempty"`
-	Enabled      bool                 `json:"enabled,omitempty"`
-
-	Status ClusterSourceStatus `json:"status,omitempty"`
-}
-
-// GitHubClusterSource is a URL to a GitHub repo containing a kind/cluster config
-type GitHubClusterSource struct {
-	URL string `json:"url"`
-}
-
-// FileClusterSource is a URL to a single YAML file containing a kind/cluster config
-type FileClusterSource struct {
-	URL string `json:"url"`
 }
 
 // ClusterStatus defines the observed state of Cluster
 type ClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	Ready              bool   `json:"ready"`
 	LoadBalancerIP     string `json:"loadBalancerIP"`
 	ClusterAdminConfig string `json:"clusterAdminConfig"`
 	DefaultUserConfig  string `json:"defaultUserConfig"`
-}
-
-// ClusterSourceStatus defines the observed state of Cluster
-type ClusterSourceStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
 }
 
 // +kubebuilder:object:root=true
@@ -94,15 +63,6 @@ type ClusterList struct {
 	Items           []Cluster `json:"items"`
 }
 
-// +kubebuilder:object:root=true
-
-// ClusterSourceList contains a list of Cluster
-type ClusterSourceList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ClusterSource `json:"items"`
-}
-
 func init() {
-	SchemeBuilder.Register(&ClusterSource{}, &ClusterSourceList{}, &Cluster{}, &ClusterList{})
+	SchemeBuilder.Register(&Cluster{}, &ClusterList{})
 }
