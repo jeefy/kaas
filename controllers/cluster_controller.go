@@ -137,6 +137,24 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 	}
 
+	svc, err := cluster.Service()
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	foundSvc := &v1.Service{}
+	err = r.Get(context.TODO(), types.NamespacedName{Name: svc.GetName(), Namespace: svc.GetNamespace()}, foundSvc)
+	if err != nil && errors.IsNotFound(err) {
+		log.Info(fmt.Sprintf("Creating Service %s/%s\n", cm.GetNamespace(), cm.GetName()))
+		err = r.Create(context.TODO(), svc)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	} else if err != nil && errors.IsAlreadyExists(err) {
+		return ctrl.Result{}, nil
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -183,6 +201,7 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&honkv1.Cluster{}).
+		Owns(&v1.Service{}).
 		Owns(&v1.Pod{}).
 		Owns(&v1.ConfigMap{}).
 		Complete(r)

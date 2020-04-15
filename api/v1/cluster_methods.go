@@ -6,13 +6,17 @@ import (
 	"log"
 	"reflect"
 
+	"github.com/ghodss/yaml"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+
+	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 )
 
 // PodSpecEquals accepts a pod and returns a bool whether the
@@ -57,13 +61,38 @@ func (c Cluster) ConfigMap(namespace string) *corev1.ConfigMap {
 
 	cm.Data = make(map[string]string)
 
-	cm.Data["kind-config.yaml"] = string(c.Spec.KindSpec)
+	kindConfig, err := c.KindConfig()
+	if err != nil {
+		log.Printf("Error getting KindConfig: %s", err.Error())
+	}
+
+	cm.Data["kind-config.yaml"] = kindConfig
 
 	for key, data := range c.Spec.ClusterYAML {
 		cm.Data[fmt.Sprintf("%d.yaml", key)] = data
 	}
 
 	return cm
+}
+
+// KindConfig generates a valid KindConfig, makes updates, then returns a string
+func (c Cluster) KindConfig() (string, error) {
+	kindConfig := &v1alpha4.Cluster{}
+
+	err := yaml.Unmarshal([]byte(c.Spec.KindSpec), kindConfig)
+	if err != nil {
+		return "", fmt.Errorf("error unmarshalling kindconfig: %s", err.Error())
+	}
+
+	kindConfig.Networking.APIServerPort = 6443
+	kindConfig.Networking.APIServerAddress = "0.0.0.0"
+
+	data, err := yaml.Marshal(kindConfig)
+	if err != nil {
+		return "", fmt.Errorf("error marshalling kindconfig: %s", err.Error())
+	}
+
+	return string(data), nil
 }
 
 // Pod generates a Pod based on the Cluster Spec
@@ -85,6 +114,12 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 		Privileged: &trueValue,
 	}
 
+	labels := c.GetLabels()
+	if len(labels) == 0 {
+		labels = make(map[string]string)
+	}
+	labels["cluster"] = c.Name
+
 	return &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind: "pod",
@@ -92,7 +127,7 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      c.Name,
 			Namespace: namespace,
-			Labels:    c.GetLabels(),
+			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(&c, SchemeBuilder.GroupVersion.WithKind("Cluster")),
 			},
@@ -191,6 +226,34 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 			},
 		},
 	}
+}
+
+// Service generates a Service to point to the Kubernetes Pod
+func (c Cluster) Service() (*v1.Service, error) {
+	selector := make(map[string]string)
+	selector["cluster"] = c.Name
+	return &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      c.Name,
+			Namespace: c.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(&c, SchemeBuilder.GroupVersion.WithKind("Cluster")),
+			},
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{
+				{
+					Name: "kube-apiserver",
+					Port: 6443,
+					TargetPort: intstr.IntOrString{
+						IntVal: 6443,
+					},
+				},
+			},
+			Selector: selector,
+			Type:     v1.ServiceTypeLoadBalancer,
+		},
+	}, nil
 }
 
 // Kubeconfig sets the cluster status kubeconfigs
