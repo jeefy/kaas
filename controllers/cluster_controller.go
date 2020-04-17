@@ -84,6 +84,24 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 	}
 
+	svc, err := cluster.Service()
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	foundSvc := &v1.Service{}
+	err = r.Get(context.TODO(), types.NamespacedName{Name: svc.GetName(), Namespace: svc.GetNamespace()}, foundSvc)
+	if err != nil && errors.IsNotFound(err) {
+		log.Info(fmt.Sprintf("Creating Service %s/%s\n", cm.GetNamespace(), cm.GetName()))
+		err = r.Create(context.TODO(), svc)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	} else if err != nil && errors.IsAlreadyExists(err) {
+		return ctrl.Result{}, nil
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	pod := cluster.Pod(req.Namespace)
 	foundPod := &v1.Pod{}
 	err = r.Get(context.TODO(), types.NamespacedName{Name: pod.GetName(), Namespace: pod.GetNamespace()}, foundPod)
@@ -121,11 +139,12 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 						log.Info("Can't get config from ctrl")
 						return ctrl.Result{}, err
 					}
-
-					cluster, err = cluster.Kubeconfig(config)
-					if err != nil {
-						log.Info("Can't get adminkubeconfig from cluster")
-						return ctrl.Result{}, err
+					if foundSvc != nil {
+						cluster, err = cluster.Kubeconfig(config, foundSvc)
+						if err != nil {
+							log.Info("Can't get adminkubeconfig from cluster")
+							return ctrl.Result{}, err
+						}
 					}
 
 					err = r.Update(context.TODO(), &cluster)
@@ -135,24 +154,6 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 				}
 			}
 		}
-	}
-
-	svc, err := cluster.Service()
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	foundSvc := &v1.Service{}
-	err = r.Get(context.TODO(), types.NamespacedName{Name: svc.GetName(), Namespace: svc.GetNamespace()}, foundSvc)
-	if err != nil && errors.IsNotFound(err) {
-		log.Info(fmt.Sprintf("Creating Service %s/%s\n", cm.GetNamespace(), cm.GetName()))
-		err = r.Create(context.TODO(), svc)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	} else if err != nil && errors.IsAlreadyExists(err) {
-		return ctrl.Result{}, nil
-	} else if err != nil {
-		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil

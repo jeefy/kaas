@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strings"
 
-	"github.com/ghodss/yaml"
+	yaml "gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -257,18 +258,22 @@ func (c Cluster) Service() (*v1.Service, error) {
 }
 
 // Kubeconfig sets the cluster status kubeconfigs
-func (c Cluster) Kubeconfig(config *rest.Config) (Cluster, error) {
+func (c Cluster) Kubeconfig(config *rest.Config, svc *v1.Service) (Cluster, error) {
 	data, err := c.catFile(config, "/root/.kube/config")
 	if err != nil {
 		return c, err
 	}
-	c.Status.ClusterAdminConfig = data
+	if len(svc.Status.LoadBalancer.Ingress) > 0 {
+		c.Status.ClusterAdminConfig = strings.Replace(data, "0.0.0.0", svc.Status.LoadBalancer.Ingress[0].IP, -1)
+	}
 
 	data, err = c.catFile(config, "/tmp/kube/k8s-kind-user-default-conf")
 	if err != nil {
 		return c, err
 	}
-	c.Status.DefaultUserConfig = data
+	if len(svc.Status.LoadBalancer.Ingress) > 0 {
+		c.Status.DefaultUserConfig = strings.Replace(data, "0.0.0.0", svc.Status.LoadBalancer.Ingress[0].IP, -1)
+	}
 
 	return c, nil
 }
