@@ -131,20 +131,55 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 		if foundPod.Status.Phase == v1.PodRunning {
 			if foundPod.Status.ContainerStatuses[0].Ready {
+				config, err := ctrl.GetConfig()
+				if err != nil {
+					log.Info("Can't get config from ctrl")
+					return ctrl.Result{}, err
+				}
+				if foundSvc != nil {
+					files := make(map[string]string)
+					files["root-config"] = "/root/.kube/config"
+					files["default-config"] = "/tmp/kube/k8s-kind-user-default-conf"
+
+					kubeconfigs, err := cluster.Kubeconfig(config, foundSvc, files)
+					log.Info(fmt.Sprintf("Gathered %d Kubeconfigs", len(kubeconfigs)))
+					if err != nil {
+						log.Info("Can't get adminkubeconfig from cluster")
+						return ctrl.Result{}, err
+					}
+					if len(kubeconfigs) > 0 {
+						secret, err := cluster.Secret("kubeconfig", kubeconfigs)
+						if err != nil {
+							log.Info("Can't generate kubeconfig secrets")
+							return ctrl.Result{}, err
+						}
+						foundSecret := v1.Secret{}
+						createSecret := false
+						err = r.Get(context.TODO(), types.NamespacedName{Name: secret.GetName(), Namespace: secret.GetNamespace()}, &foundSecret)
+						if err == nil && !reflect.DeepEqual(foundSecret.StringData, secret.StringData) {
+							err = r.Delete(context.TODO(), &foundSecret)
+							createSecret = true
+							if err != nil {
+								log.Info("Can't delete old secrets")
+								return ctrl.Result{}, err
+							}
+						}
+						if err != nil && errors.IsNotFound(err) {
+							createSecret = true
+						}
+						if createSecret {
+							err = r.Create(context.TODO(), secret)
+							if err != nil {
+								return ctrl.Result{}, err
+							}
+						}
+					}
+				}
 				if !cluster.Status.Ready {
 					cluster.Status.Ready = true
 
-					config, err := ctrl.GetConfig()
-					if err != nil {
-						log.Info("Can't get config from ctrl")
-						return ctrl.Result{}, err
-					}
-					if foundSvc != nil {
-						cluster, err = cluster.Kubeconfig(config, foundSvc)
-						if err != nil {
-							log.Info("Can't get adminkubeconfig from cluster")
-							return ctrl.Result{}, err
-						}
+					if len(svc.Status.LoadBalancer.Ingress) > 0 {
+						cluster.Status.LoadBalancerIP = svc.Status.LoadBalancer.Ingress[0].IP
 					}
 
 					err = r.Update(context.TODO(), &cluster)

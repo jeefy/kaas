@@ -257,25 +257,40 @@ func (c Cluster) Service() (*v1.Service, error) {
 	}, nil
 }
 
-// Kubeconfig sets the cluster status kubeconfigs
-func (c Cluster) Kubeconfig(config *rest.Config, svc *v1.Service) (Cluster, error) {
-	data, err := c.catFile(config, "/root/.kube/config")
-	if err != nil {
-		return c, err
-	}
-	if len(svc.Status.LoadBalancer.Ingress) > 0 {
-		c.Status.ClusterAdminConfig = strings.Replace(data, "0.0.0.0", svc.Status.LoadBalancer.Ingress[0].IP, -1)
+// Secret stores a Secret owned by the Cluster
+func (c Cluster) Secret(name string, data map[string]string) (*v1.Secret, error) {
+	selector := make(map[string]string)
+	selector["cluster"] = c.Name
+	return &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s", c.Name, name),
+			Namespace: c.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(&c, SchemeBuilder.GroupVersion.WithKind("Cluster")),
+			},
+		},
+		Type:       v1.SecretTypeOpaque,
+		StringData: data,
+	}, nil
+}
+
+// Kubeconfig gets the cluster kubeconfigs
+func (c Cluster) Kubeconfig(config *rest.Config, svc *v1.Service, configs map[string]string) (map[string]string, error) {
+	kubeconfigs := make(map[string]string)
+
+	for k, v := range configs {
+		log.Printf("Catting file %s", v)
+		data, err := c.catFile(config, v)
+		if err != nil {
+			return nil, err
+		}
+		if len(svc.Status.LoadBalancer.Ingress) > 0 {
+			log.Printf("Swapping out IP for loadBalancer IP: %s", svc.Status.LoadBalancer.Ingress[0].IP)
+			kubeconfigs[k] = strings.Replace(data, "0.0.0.0", svc.Status.LoadBalancer.Ingress[0].IP, -1)
+		}
 	}
 
-	data, err = c.catFile(config, "/tmp/kube/k8s-kind-user-default-conf")
-	if err != nil {
-		return c, err
-	}
-	if len(svc.Status.LoadBalancer.Ingress) > 0 {
-		c.Status.DefaultUserConfig = strings.Replace(data, "0.0.0.0", svc.Status.LoadBalancer.Ingress[0].IP, -1)
-	}
-
-	return c, nil
+	return kubeconfigs, nil
 }
 
 func (c Cluster) catFile(config *rest.Config, filename string) (data string, err error) {

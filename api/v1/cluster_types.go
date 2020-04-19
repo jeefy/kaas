@@ -37,10 +37,8 @@ type ClusterSpec struct {
 type ClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Ready              bool   `json:"ready"`
-	LoadBalancerIP     string `json:"loadBalancerIP"`
-	ClusterAdminConfig string `json:"clusterAdminConfig"`
-	DefaultUserConfig  string `json:"defaultUserConfig"`
+	Ready          bool   `json:"ready"`
+	LoadBalancerIP string `json:"loadBalancerIP"`
 }
 
 // +kubebuilder:object:root=true
