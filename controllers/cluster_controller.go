@@ -73,7 +73,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	} else if err != nil {
 		return ctrl.Result{}, err
 	} else {
-		if !reflect.DeepEqual(cm.Data, foundCM.Data) {
+		if len(cm.Data) > 0 && len(foundCM.Data) > 0 && !reflect.DeepEqual(cm.Data, foundCM.Data) {
 			log.Info(fmt.Sprintf("Updating ConfigMap object %s/%s", cm.Namespace, cm.Name))
 			foundCM.Data = cm.Data
 			err = r.Update(context.TODO(), foundCM)

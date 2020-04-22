@@ -22,11 +22,25 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// ClusterType is a list of the types of local clusters we can provision
+type ClusterType string
+
+const (
+	// KindCluster is a sigs.k8s.io/kind cluster
+	KindCluster ClusterType = "kind"
+	// K3sCluster is a k3s.io cluster
+	K3sCluster ClusterType = "k3s"
+)
+
 // ClusterSpec defines the desired state of Cluster
 type ClusterSpec struct {
-	KindSpec string `json:"kindSpec,omitempty"`
+	ClusterType ClusterType `json:"clusterType"`
+
+	ClusterSpec string `json:"clusterSpec,omitempty"`
 
 	ClusterYAML []string `json:"clusterYAML,omitempty"`
+
+	Image string `json:"image,omitempty"`
 
 	CPU *resource.Quantity `json:"cpu"`
 

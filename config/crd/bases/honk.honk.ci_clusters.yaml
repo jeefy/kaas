@@ -34,6 +34,12 @@ spec:
         spec:
           description: ClusterSpec defines the desired state of Cluster
           properties:
+            clusterSpec:
+              type: string
+            clusterType:
+              description: ClusterType is a list of the types of local clusters we
+                can provision
+              type: string
             clusterYAML:
               items:
                 type: string
@@ -44,7 +50,7 @@ spec:
               - type: string
               pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
               x-kubernetes-int-or-string: true
-            kindSpec:
+            image:
               type: string
             memory:
               anyOf:
@@ -53,6 +59,7 @@ spec:
               pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
               x-kubernetes-int-or-string: true
           required:
+          - clusterType
           - cpu
           - memory
           type: object

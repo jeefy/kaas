@@ -1,0 +1,9 @@
+kind: Cluster
+apiVersion: honk.honk.ci/v1
+metadata:
+  name: k3s-cluster
+spec:
+  clusterType: k3s
+  image: rancher/k3s:latest
+  cpu: 500m
+  memory: 1Gi

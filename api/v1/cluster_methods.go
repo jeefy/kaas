@@ -62,12 +62,14 @@ func (c Cluster) ConfigMap(namespace string) *corev1.ConfigMap {
 
 	cm.Data = make(map[string]string)
 
-	kindConfig, err := c.KindConfig()
-	if err != nil {
-		log.Printf("Error getting KindConfig: %s", err.Error())
-	}
+	if c.Spec.ClusterType == KindCluster {
+		kindConfig, err := c.KindConfig()
+		if err != nil {
+			log.Printf("Error getting KindConfig: %s", err.Error())
+		}
 
-	cm.Data["kind-config.yaml"] = kindConfig
+		cm.Data["kind-config.yaml"] = kindConfig
+	}
 
 	for key, data := range c.Spec.ClusterYAML {
 		cm.Data[fmt.Sprintf("%d.yaml", key)] = data
@@ -80,7 +82,7 @@ func (c Cluster) ConfigMap(namespace string) *corev1.ConfigMap {
 func (c Cluster) KindConfig() (string, error) {
 	kindConfig := &v1alpha4.Cluster{}
 
-	err := yaml.Unmarshal([]byte(c.Spec.KindSpec), kindConfig)
+	err := yaml.Unmarshal([]byte(c.Spec.ClusterSpec), kindConfig)
 	if err != nil {
 		return "", fmt.Errorf("error unmarshalling kindconfig: %s", err.Error())
 	}
@@ -98,17 +100,33 @@ func (c Cluster) KindConfig() (string, error) {
 
 // Pod generates a Pod based on the Cluster Spec
 func (c Cluster) Pod(namespace string) *corev1.Pod {
+	command := "sleep 5 && curl -sSLo /root/add_sa.sh https://gist.githubusercontent.com/jeefy/81fb5bc9b95898c1492d796a8a27ab10/raw/374f0cf09a6a6eceb5ae982bbd5df39dab7804e5/kubernetes_add_service_account_kubeconfig.sh && chmod +x /root/add_sa.sh && apt update && apt install -y jq && mkdir -p /root/.kube/ && "
 	defaultMode := int32(0777)
 	falseValue := false
 	resourceList := v1.ResourceList{}
 	resourceList[v1.ResourceCPU] = *c.Spec.CPU
 	resourceList[v1.ResourceMemory] = *c.Spec.Memory
-	command := "sleep 5 && curl -sSLo \"${PATH%%:*}/kind\" https://storage.googleapis.com/bentheelder-kind-ci-builds/latest/kind-linux-amd64 && chmod +x \"${PATH%%:*}/kind\" && curl -sSLo /root/add_sa.sh https://gist.githubusercontent.com/jeefy/81fb5bc9b95898c1492d796a8a27ab10/raw/374f0cf09a6a6eceb5ae982bbd5df39dab7804e5/kubernetes_add_service_account_kubeconfig.sh && chmod +x /root/add_sa.sh && apt update && apt install -y jq && kind create cluster --config=/honk/kind-config.yaml && sleep 5 && /root/add_sa.sh kind-user default && sleep 5"
+	image := c.Spec.Image
+	switch c.Spec.ClusterType {
+	case KindCluster:
+		if c.Spec.Image == "" {
+			image = "kindest/node:v1.18.0"
+		}
+		command += fmt.Sprintf("curl -sSLo \"${PATH%%%%:*}/kind\" https://storage.googleapis.com/bentheelder-kind-ci-builds/latest/kind-linux-amd64 && chmod +x \"${PATH%%%%:*}/kind\" && kind create cluster --image %s --config=/honk/kind-config.yaml && ", image)
+	case K3sCluster:
+		if c.Spec.Image == "" {
+			image = "rancher/k3s:v1.18.2-rc1-k3s1"
+		}
+		command += fmt.Sprintf("curl -s https://raw.githubusercontent.com/rancher/k3d/master/install.sh | bash && k3d create --image %s --api-port 6443 && sleep 30 && cp -ruf $(k3d get-kubeconfig) /root/.kube/config && ", image)
+	}
+
+	command += "sleep 5 && /root/add_sa.sh kind-user default && sleep 5 && "
+
 	for key := range c.Spec.ClusterYAML {
-		command += fmt.Sprintf(" && kubectl apply -f /honk/%d.yaml && sleep 5", key)
+		command += fmt.Sprintf("kubectl apply -f /honk/%d.yaml && sleep 5 && ", key)
 	}
 	//  && kubectl apply -f /honk/01.yaml && sleep 5 && kubectl apply -f /honk/02.yaml && sleep 5 && kubectl apply -f /honk/03.yaml"
-	command += " && kubectl create ns honk && sleep infinity"
+	command += " kubectl create ns honk && sleep infinity"
 
 	trueValue := true
 	securityContext := v1.SecurityContext{
