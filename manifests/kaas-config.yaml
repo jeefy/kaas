@@ -1,0 +1,6 @@
+kind: KaasConfig
+apiVersion: honk.honk.ci/v1
+metadata:
+  name: config
+  namespace: kaas-system
+defaultServiceType: ClusterIP

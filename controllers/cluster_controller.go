@@ -49,6 +49,11 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	var err error
 	var update bool
 
+	var kaasConfig honkv1.KaasConfig
+	if err = r.Get(ctx, types.NamespacedName{Name: "config", Namespace: "kaas-system"}, &kaasConfig); err != nil {
+		// We proceed as normal. The config just overrides the defaults.
+	}
+
 	var cluster honkv1.Cluster
 	if err = r.Get(ctx, req.NamespacedName, &cluster); err != nil {
 		// log.Error(err, "unable to fetch Cluster")
@@ -58,6 +63,8 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		//return ctrl.Result{}, client.IgnoreNotFound(err)
 		return ctrl.Result{}, nil
 	}
+
+	cluster = cluster.SetConfig(&kaasConfig)
 
 	cm := cluster.ConfigMap(req.Namespace)
 	foundCM := &v1.ConfigMap{}

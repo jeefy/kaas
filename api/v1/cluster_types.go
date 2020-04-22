@@ -15,12 +15,24 @@ limitations under the License.
 package v1
 
 import (
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+
+// +kubebuilder:object:root=true
+
+// KaasConfig contains some global config information used by Kaas
+type KaasConfig struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	DefaultServiceType v1.ServiceType `json:"defaultServiceType,omitempty"`
+	DefaultPort        v1.ServicePort `json:"defaultPort,omitempty"`
+}
 
 // ClusterType is a list of the types of local clusters we can provision
 type ClusterType string
@@ -64,6 +76,8 @@ type Cluster struct {
 
 	Spec   ClusterSpec   `json:"spec,omitempty"`
 	Status ClusterStatus `json:"status,omitempty"`
+
+	KaasConfig *KaasConfig `json:"kaasConfig,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -76,5 +90,5 @@ type ClusterList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Cluster{}, &ClusterList{})
+	SchemeBuilder.Register(&Cluster{}, &ClusterList{}, &KaasConfig{})
 }

@@ -20,6 +20,12 @@ import (
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 )
 
+// SetConfig stores the KaasConfig object internally as part of the cluster
+func (c Cluster) SetConfig(config *KaasConfig) Cluster {
+	c.KaasConfig = config
+	return c
+}
+
 // PodSpecEquals accepts a pod and returns a bool whether the
 // podSpec is the same as a generated podSpec.
 // Since we have no way to DeepEquals podSpecs, we have to
@@ -251,6 +257,23 @@ func (c Cluster) Pod(namespace string) *corev1.Pod {
 func (c Cluster) Service() (*v1.Service, error) {
 	selector := make(map[string]string)
 	selector["cluster"] = c.Name
+
+	// Set up the defaults
+	loadBalancerType := v1.ServiceTypeLoadBalancer
+	if c.KaasConfig.DefaultServiceType != "" {
+		loadBalancerType = c.KaasConfig.DefaultServiceType
+	}
+
+	servicePort := v1.ServicePort{
+		Name: "kube-apiserver",
+		Port: 6443,
+		TargetPort: intstr.IntOrString{
+			IntVal: 6443,
+		},
+	}
+	if c.KaasConfig.DefaultPort.Size() != 0 {
+		servicePort = c.KaasConfig.DefaultPort
+	}
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      c.Name,
@@ -261,16 +284,10 @@ func (c Cluster) Service() (*v1.Service, error) {
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{
-				{
-					Name: "kube-apiserver",
-					Port: 6443,
-					TargetPort: intstr.IntOrString{
-						IntVal: 6443,
-					},
-				},
+				servicePort,
 			},
 			Selector: selector,
-			Type:     v1.ServiceTypeLoadBalancer,
+			Type:     loadBalancerType,
 		},
 	}, nil
 }
