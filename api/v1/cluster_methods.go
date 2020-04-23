@@ -260,6 +260,7 @@ func (c Cluster) Service() (*v1.Service, error) {
 
 	// Set up the defaults
 	loadBalancerType := v1.ServiceTypeLoadBalancer
+	log.Printf("Default LB Type: %s", c.KaasConfig.DefaultServiceType)
 	if c.KaasConfig.DefaultServiceType != "" {
 		loadBalancerType = c.KaasConfig.DefaultServiceType
 	}
@@ -271,7 +272,8 @@ func (c Cluster) Service() (*v1.Service, error) {
 			IntVal: 6443,
 		},
 	}
-	if c.KaasConfig.DefaultPort.Size() != 0 {
+	log.Printf("Default service port: %v", c.KaasConfig.DefaultPort)
+	if c.KaasConfig.DefaultPort.Port != 0 {
 		servicePort = c.KaasConfig.DefaultPort
 	}
 	return &v1.Service{

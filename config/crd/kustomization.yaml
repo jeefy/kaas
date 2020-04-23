@@ -3,6 +3,8 @@
 # It should be run by config/default
 resources:
 - bases/honk.honk.ci_clusters.yaml
+- bases/honk.honk.ci_kaasconfigs.yaml
+- bases/honk.honk.ci_namespace.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patchesStrategicMerge:

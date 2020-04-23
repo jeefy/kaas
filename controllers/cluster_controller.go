@@ -52,6 +52,7 @@ func (r *ClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	var kaasConfig honkv1.KaasConfig
 	if err = r.Get(ctx, types.NamespacedName{Name: "config", Namespace: "kaas-system"}, &kaasConfig); err != nil {
 		// We proceed as normal. The config just overrides the defaults.
+		log.Info(err.Error())
 	}
 
 	var cluster honkv1.Cluster

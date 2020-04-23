@@ -89,6 +89,15 @@ type ClusterList struct {
 	Items           []Cluster `json:"items"`
 }
 
+// +kubebuilder:object:root=true
+
+// KaasConfigList contains a list of Cluster
+type KaasConfigList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []KaasConfig `json:"items"`
+}
+
 func init() {
-	SchemeBuilder.Register(&Cluster{}, &ClusterList{}, &KaasConfig{})
+	SchemeBuilder.Register(&Cluster{}, &ClusterList{}, &KaasConfig{}, &KaasConfigList{})
 }
