@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"math/rand"
 	"reflect"
 	"strings"
 
@@ -259,7 +260,7 @@ func (c Cluster) Service() (*v1.Service, error) {
 	selector["cluster"] = c.Name
 
 	// Set up the defaults
-	loadBalancerType := v1.ServiceTypeLoadBalancer
+	loadBalancerType := v1.ServiceTypeNodePort
 	log.Printf("Default LB Type: %s", c.KaasConfig.DefaultServiceType)
 	if c.KaasConfig.DefaultServiceType != "" {
 		loadBalancerType = c.KaasConfig.DefaultServiceType
@@ -312,8 +313,58 @@ func (c Cluster) Secret(name string, data map[string]string) (*v1.Secret, error)
 }
 
 // Kubeconfig gets the cluster kubeconfigs
-func (c Cluster) Kubeconfig(config *rest.Config, svc *v1.Service, configs map[string]string) (map[string]string, error) {
-	kubeconfigs := make(map[string]string)
+// It makes several assumptions depending on the ServiceType
+// If those assumptions are incorrect.... WELP. It'll just die.
+func (c Cluster) Kubeconfig(config *rest.Config, svc *v1.Service, configs map[string]string) (kubeconfigs map[string]string, err error) {
+	kubeconfigs = make(map[string]string)
+	var port int32
+	ip := "0.0.0.0"
+	rand.Seed(112358)
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Printf("Unable to create clientset: %s", err.Error())
+		return kubeconfigs, err
+	}
+
+	// Load Balancers are SO EASY
+	if svc.Spec.Type == v1.ServiceTypeLoadBalancer && len(svc.Status.LoadBalancer.Ingress) > 0 {
+		log.Printf("Swapping out IP for loadBalancer IP: %s", svc.Status.LoadBalancer.Ingress[0].IP)
+		ip = svc.Status.LoadBalancer.Ingress[0].IP
+		port = svc.Spec.Ports[0].Port
+	}
+
+	// Otherwise easiest is a NodePort
+	if svc.Spec.Type == v1.ServiceTypeNodePort {
+		// Nodes can have multiple IPs, let's handle that
+		internalAddress := ""
+		externalAddress := ""
+		nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+		if err != nil {
+			return nil, err
+		}
+
+		// Let's select a random node since it'll all go to the same place anyway
+		node := nodes.Items[rand.Intn(len(nodes.Items))]
+
+		for _, address := range node.Status.Addresses {
+			if address.Type == v1.NodeExternalIP {
+				externalAddress = address.Address
+			}
+			if address.Type == v1.NodeInternalIP {
+				internalAddress = address.Address
+			}
+		}
+		// Set the default to the internal address first
+		ip = internalAddress
+
+		// If a node has an external address, that takes precedence
+		if externalAddress != "" {
+			ip = externalAddress
+		}
+		port = svc.Spec.Ports[0].NodePort
+		log.Printf("Swapping out IP/Port for NodePort IP/Port: %s:%d", ip, port)
+	}
 
 	for k, v := range configs {
 		log.Printf("Catting file %s", v)
@@ -321,9 +372,10 @@ func (c Cluster) Kubeconfig(config *rest.Config, svc *v1.Service, configs map[st
 		if err != nil {
 			return nil, err
 		}
-		if len(svc.Status.LoadBalancer.Ingress) > 0 {
-			log.Printf("Swapping out IP for loadBalancer IP: %s", svc.Status.LoadBalancer.Ingress[0].IP)
-			kubeconfigs[k] = strings.Replace(data, "0.0.0.0", svc.Status.LoadBalancer.Ingress[0].IP, -1)
+		if port > 0 {
+			kubeconfigs[k] = strings.Replace(data, "0.0.0.0:6443", fmt.Sprintf("%s:%d", ip, port), -1)
+		} else {
+			kubeconfigs[k] = strings.Replace(data, "0.0.0.0", ip, -1)
 		}
 	}
 

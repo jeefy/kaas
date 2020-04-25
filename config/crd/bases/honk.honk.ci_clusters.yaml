@@ -4,10 +4,20 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.2.4
+    controller-gen.kubebuilder.io/version: v0.2.8
   creationTimestamp: null
   name: clusters.honk.honk.ci
 spec:
+  additionalPrinterColumns:
+  - JSONPath: .status.ready
+    name: Ready
+    type: boolean
+  - JSONPath: .spec.clusterType
+    name: Flavor
+    type: string
+  - JSONPath: .metadata.creationTimestamp
+    name: Age
+    type: date
   group: honk.honk.ci
   names:
     kind: Cluster
@@ -15,6 +25,7 @@ spec:
     plural: clusters
     singular: cluster
   scope: Namespaced
+  subresources: {}
   validation:
     openAPIV3Schema:
       description: Cluster is the Schema for the clusters API
@@ -109,11 +120,19 @@ spec:
                 type: string
               type: array
             cpu:
-              type: string
+              anyOf:
+              - type: integer
+              - type: string
+              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+              x-kubernetes-int-or-string: true
             image:
               type: string
             memory:
-              type: string
+              anyOf:
+              - type: integer
+              - type: string
+              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+              x-kubernetes-int-or-string: true
           required:
           - clusterType
           - cpu

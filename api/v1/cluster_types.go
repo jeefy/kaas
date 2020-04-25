@@ -67,9 +67,11 @@ type ClusterStatus struct {
 	LoadBalancerIP string `json:"loadBalancerIP"`
 }
 
-// +kubebuilder:object:root=true
-
 // Cluster is the Schema for the clusters API
+// +kubebuilder:object:root=true
+// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
+// +kubebuilder:printcolumn:name="Flavor",type=string,JSONPath=`.spec.clusterType`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

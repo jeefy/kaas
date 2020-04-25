@@ -19,7 +19,7 @@ Honk (Expand on this later)
 make install && make run
 
 # In a new window
-kubectl apply -f manifests/cluster-test.yaml
+kubectl apply -f manifests/kind-cluster.yaml
 kubectl get pods -w
 
 # Once the pod is ready, the cluster is up! Let's get access to the test cluster!
@@ -28,8 +28,8 @@ kubectl get pods -w
 # The cluster secret contains both an admin Kubeconfig (root-config) as well as a Kubeconfig for system:serviceaccount:default:default (default-config)
 # Note: The default account does not have any RBAC
 
-kubectl get secret test-cluster-kubeconfig -o json | jq '.["data"]["root-config"]' | tr -d '"' | base64 -d > /tmp/test-cluster-kubeconfig
-export KUBECONFIG=/tmp/test-cluster-kubeconfig
+kubectl get secret kind-cluster-kubeconfig -o json | jq '.["data"]["root-config"]' | tr -d '"' | base64 -d > /tmp/kind-cluster-kubeconfig
+export KUBECONFIG=/tmp/kind-cluster-kubeconfig
 
 # From here you should have access to your cluster within a cluster
 ```
@@ -45,9 +45,7 @@ For individual clusters, see the [manifests/kind-cluster.yaml](/manifests/kind-c
 
 ## Future State
 - CLI interface for better UX (WIP)
-- Kubeconfig generation for more than ServiceType LoadBalancer
 - Additional cluster types
   - OpenShift (likely crc)
   - MiniKube
 - Actual release process
-- Format result of `kubectl get clusters` better
